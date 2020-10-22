@@ -1,0 +1,162 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.VFX;
+
+[RequireComponent(typeof(VisualEffect))]
+
+public class VFXPositionArrayBaker : MonoBehaviour
+{
+    public enum RespondType
+    {
+        OnAdd,
+        OnAlive,
+        OnLeave
+    }
+
+    [Space]
+
+    [Header("或基于compute buffer的VFXPositionMapBaker。")]
+    [Space]
+    [Header("请用基于Texture2D的VFXPositionsTex2DBaker")]
+    [Space]
+    [Header("Warning:这个类已经不用了。")]
+    [Space]
+    public RespondType respondType = RespondType.OnAlive;
+
+    public DataProducer producer;
+    public bool printDebug = false;
+
+    [Space]
+    
+    public DataModifier modifier;
+
+    // ------
+
+    private VisualEffect _vfx;
+    // Start is called before the first frame update
+
+    [HideInInspector]
+    public Texture2D sampler2d;
+
+    protected int sampler2D_size_l = 16;
+    protected int sampler2D_totalSize;
+    protected Color[] sampler_flatten;
+
+
+    List<Affector> tors;
+    void Start()
+    {
+        // 一定要选TextureFormat.RGBAFloat才能正确保存位置信息
+        sampler2d = new Texture2D(sampler2D_size_l, sampler2D_size_l,
+             TextureFormat.RGBAFloat, false);
+        sampler2d.wrapMode = TextureWrapMode.Clamp;
+        sampler2d.filterMode = FilterMode.Point;
+        sampler_flatten = new Color[sampler2D_size_l * sampler2D_size_l];
+        sampler2D_totalSize = sampler2D_size_l * sampler2D_size_l;
+        _vfx = gameObject.GetComponent<VisualEffect>();
+
+
+        if (respondType == RespondType.OnAdd)
+        {
+            EventManager.OnAffectorAdded += OnAddAffector;
+        }
+        if (respondType == RespondType.OnLeave)
+        {
+            EventManager.OnAffectorLeave += OnAffectorLeave;
+        }
+
+        tors = new List<Affector>();
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (respondType == RespondType.OnAlive)
+        {
+            // write affector data to tex2D
+            tors = producer.GetAffectors();
+            if (printDebug)
+            {
+                print("Affectors = " + tors.Count);
+            }
+        }
+
+        if (tors != null && tors.Count > 0)
+        { 
+            BakeAffectorPositions(tors);
+        }
+
+    }
+
+    /// <summary>
+    /// Write affector positions in sample2D tex.
+    /// </summary>
+    /// <param name="tors"> Affectors of screen-space positions</param>
+    void BakeAffectorPositions(List<Affector> tors)
+    {
+        List<Vector4> values = new List<Vector4>();
+        int tors_i = 0;
+
+        Vector4 posPixel = new Vector4();
+
+        //必须要把所有的sampler2D槽位都填满
+        while (values.Count < sampler2D_totalSize)
+        { 
+
+            posPixel.x = tors[tors_i].pos.x;
+            posPixel.y = tors[tors_i].pos.y;
+            posPixel.z = tors[tors_i].pos.z;
+            posPixel.w = 0;
+            values.Add(posPixel);
+            tors_i++;
+            tors_i %= tors.Count;
+        }
+
+
+        SetValueToTex2D(values, sampler2d);
+    }
+
+    void SetValueToTex2D(List<Vector4> values, Texture2D tex)
+    {
+
+        int index = 0;
+
+        for (int i = 0; i < sampler2D_size_l; i++)
+        {
+            for (int j = 0; j < sampler2D_size_l; j++)
+            {
+                sampler_flatten[index] = values[index];
+                index++;
+                if (index >= values.Count) break;
+            }
+            if (index >= values.Count) break;
+        }
+
+
+        tex.SetPixels(sampler_flatten, 0); 
+        tex.Apply();
+        _vfx.SetTexture("UserTex", tex);
+        _vfx.SetInt("UserTexSizeL", sampler2D_size_l);
+
+        
+    }
+
+
+
+    // event handler
+    void OnAddAffector(EventArgs e)
+    {
+        if (e.device != producer.GetDeviceType()) return;
+        Vector3 worldPos = e.affector.pos;
+        tors.Add(new Affector(worldPos));
+    }
+
+
+    // event handler
+    void OnAffectorLeave(EventArgs e)
+    {
+        if (e.device != producer.GetDeviceType()) return;
+        Vector3 worldPos = e.affector.pos;
+        tors.Add(new Affector(worldPos));
+    }
+}
