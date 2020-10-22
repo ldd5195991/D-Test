@@ -1,0 +1,299 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+
+public class PrefabPoolGenerator : MonoBehaviour
+{
+    [Tooltip("启用时将不会动态创建prefab。建议在可提前预知affector个数时使用该模式，并在该物体下放置正确数量的物体")]
+    public bool staticPool = false;
+    public bool listenAddAffectorEvent = true;
+    public bool listenRemoveAffectorEvent = true;
+    public enum InputType { DataProducer, Filter };
+
+    [Header("Input")]
+    private InputType inputType = InputType.DataProducer;
+    public DataProducer producer;
+    //public ProducerFilter filter;
+
+    [Header("Prefab")]
+    public GameObject[] moverPrefabs;
+
+    public int maxPrefab = 30;
+
+    [Header("Easing")]
+    public bool useEasing = false;
+    [Tooltip("渐入渐出效果的持续秒数")]
+    public float easingDuration = 3.0f;
+    [Tooltip("位置更新的平滑程度，数值越低位置移动越慢")]
+    [Range(0,1)]
+    public float positionLerpFactor = 0.02f;
+
+    List< GameObject > pool;
+    int availPtr = 0;
+    // Start is called before the first frame update
+
+    Dictionary<int, int> activeTable;
+    void Start()
+    {
+        activeTable = new Dictionary<int, int>();
+        pool = new List<GameObject>();
+        if (!staticPool)
+        {
+            for (int i = 0; i < maxPrefab; i++)
+            {
+                pool.Add( Instantiate(moverPrefabs[i % moverPrefabs.Length], this.transform) );
+            }
+        }
+        else
+        {
+            Transform[] staticPoolObjects = this.GetComponentsInChildren<Transform>();
+            if (staticPoolObjects.Length > 1)
+            {
+
+
+
+                for (int i = 0; i < staticPoolObjects.Length; i++)
+                {
+                    
+                    Transform t = staticPoolObjects[i];
+                    if (t.transform == this.transform || t.transform.parent != this.transform) continue;
+                    pool.Add(t.gameObject);
+                }
+            } 
+            else
+            {
+                print("Error: you should put objects of  pre-known number under this object!");
+            }
+        } 
+
+
+
+        for (int i = 0; i < pool.Count; i++)
+        {
+            pool[i].SetActive(false);
+            pool[i].transform.localPosition = new Vector3(0, 0, 0);
+        }
+
+         if (inputType == InputType.DataProducer)
+        {
+            if (listenAddAffectorEvent)//收听添加影响事件
+            {
+                EventManager.OnAffectorAdded += OnAddAffector;
+               
+            }
+            if (listenRemoveAffectorEvent)//听取删除影响事件
+            {
+                EventManager.OnAffectorLeave += OnAffectorLeave;
+            }
+        }
+    }
+     
+    // Update is called once per frame
+    void Update()
+    {
+        List<Affector> ps = null;
+        switch (inputType)
+        {
+            case InputType.DataProducer:
+                ps = producer.GetAffectors();
+                break;
+            //case InputType.Filter:
+            //    ps = filter.GetFilteredOutput();
+            //    break;
+             
+        }
+         
+        if (ps != null)
+        {
+              
+            Vector3 averagePos = new Vector3();
+            for (int i = 0; i < ps.Count; i++)
+            {
+                Vector3 p = ps[i].pos;
+                averagePos += p * 1.0f / ps.Count;
+                  
+                int prefabIndex = 0;
+                if (!activeTable.ContainsKey(ps[i].AffectorID))//判断是否包含指定的键名
+                {
+                    // new affector
+                    prefabIndex = GetAvalibleGameobjPointer();//获得有效的指针
+                    activeTable[ps[i].AffectorID] = prefabIndex;
+
+                }
+                else
+                {
+                    //existed affector
+                    prefabIndex = activeTable[ps[i].AffectorID];
+                }
+
+
+                // update position
+
+
+
+            /*    if (!(staticPool && pool.Count == 1))
+                {
+
+                    pool[prefabIndex].transform.position = Vector3.Lerp(pool[prefabIndex].transform.position + Vector3.zero,
+                        p, positionLerpFactor);//初值，末值，插值
+                }
+                if (staticPool && pool.Count == 1)
+                {
+
+                    pool[0].transform.position = Vector3.Lerp(pool[0].transform.position + Vector3.zero,
+                        averagePos, positionLerpFactor);
+                }*/
+                
+
+
+
+                if (!pool[prefabIndex].activeInHierarchy)
+                {
+                    GameObject gameObject = pool[prefabIndex];
+
+
+                    SetGameObjectActive(gameObject, true);
+                }
+            }
+
+
+            
+        }
+
+        
+        
+    }
+
+    void SetGameObjectActive(GameObject gameObject, bool b)
+    {
+
+        gameObject.SetActive(true);
+        // set gameObject children active
+        Transform[] transforms = gameObject.GetComponentsInChildren<Transform>();
+        foreach (Transform t in transforms)
+        {
+            t.gameObject.SetActive(true);
+        }
+    }
+
+    int GetAvalibleGameobjPointer()
+    {
+        int testCount = 0;
+        while (testCount < maxPrefab)
+        {
+            if (pool[availPtr].activeInHierarchy)
+            {
+                availPtr++;
+                availPtr %= maxPrefab;
+                testCount++;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return availPtr;
+    }
+
+    float adjustFloat(float x)
+    {
+        return x + 0.05f * Mathf.Cos(x * Mathf.PI);//digui
+    }
+
+
+    // event handler
+    void OnAddAffector(EventArgs e)
+    {
+        if (e.device != producer.GetDeviceType()) return; 
+        Vector3 worldPos = e.affector.pos;
+
+        int prefabIndex = 0;
+
+
+        int aid = e.affector.AffectorID;
+        if (!activeTable.ContainsKey(aid))
+        {
+            prefabIndex = GetAvalibleGameobjPointer();
+            activeTable[aid] = prefabIndex;
+        }
+        else
+        {
+            prefabIndex = activeTable[aid];
+        }
+
+        if (useEasing)
+        {
+            StartCoroutine(OnAddNewPrefab(easingDuration, pool[prefabIndex].transform));
+        }
+        GameObject gameObject = pool[prefabIndex];
+        gameObject.transform.position = worldPos;
+        
+        
+        gameObject.SetActive(true);
+
+        // set gameObject children active
+        Transform[] transforms = gameObject.GetComponentsInChildren<Transform>();
+        foreach (Transform t in transforms)
+        {
+            t.gameObject.SetActive(true);
+        }
+
+
+    }
+
+    // event handler
+    void OnAffectorLeave(EventArgs e)
+    {
+        //print("receive leave event");
+        if (e.device != producer.GetDeviceType() 
+            || e.machineID != producer.machineID) return;
+        int pid = e.affector.AffectorID; 
+        int curKey = pid;
+
+        if (useEasing)
+        {
+            StartCoroutine(OnRemovePrefab(easingDuration, pid));
+        } else
+        {
+            pool[activeTable[pid]].SetActive(false);
+            activeTable.Remove(pid);
+        }
+
+    }
+
+    IEnumerator OnRemovePrefab(float totalDur, int pid)
+    {
+        Transform t = pool[activeTable[pid]].transform;
+
+        float dur = totalDur;//总持续时间
+        float state = 0;
+        while (dur > 0)
+        {
+            dur -= Time.deltaTime;
+            state = 1.0f - dur / totalDur; // 0 -- 1
+            state = dur / totalDur;
+            t.localScale = new Vector3(1, 1, 1) * (state + 0.0001f);
+            yield return null;
+        }
+        // 关闭没有激活的prefab
+        pool[activeTable[pid]].SetActive(false);
+        activeTable.Remove(pid);
+    }
+
+
+    IEnumerator OnAddNewPrefab(float totalDur, Transform t)
+    {
+
+        float dur = totalDur;
+        float state = 0;
+        while (dur > 0)
+        {
+            dur -= Time.deltaTime;
+            
+            state = 1.0f - dur / totalDur; // 0 -- 1 
+            t.localScale = new Vector3(1, 1, 1) * (state + 0.0001f);
+            yield return null;
+        }
+    }
+}
