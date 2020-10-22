@@ -1,0 +1,33 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class TestControl : MonoBehaviour
+{
+    public bool triggerAll = true;
+    // Start is called before the first frame update
+    void Start()
+    {
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+
+        if (Input.anyKeyDown)
+        {
+
+            foreach (GameObject obj in GameObject.FindGameObjectsWithTag("manager"))
+            {
+                EffectManager effectManager = obj.GetComponent<EffectManager>();
+                TriggerEventArgs e = new TriggerEventArgs();
+                e.jindiEntity = effectManager.entity;
+                effectManager.OnPointTriggeredOn(e);
+
+
+            }
+            print("trigger");
+            triggerAll = false;
+        }
+    }
+}
